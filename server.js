@@ -16,7 +16,12 @@ const io = require("socket.io")(3000, {
     // Tell everyone the new list of names
     io.emit("update-user-list", Object.values(activeUsers));
   });
-
+  expo.sendPushNotificationsAsync([{
+    to: userPushToken,
+    title: `New message from ${data.user}`,
+    body: data.content,
+    data: { user: data.user, content: data.content }, // <--- THIS IS WHAT THE TASK USES
+  }]);
   socket.on("disconnect", () => {
     delete activeUsers[socket.id];
     io.emit("update-user-list", Object.values(activeUsers));
