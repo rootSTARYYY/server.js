@@ -5,51 +5,48 @@ const io = require("socket.io")(process.env.PORT || 3000, {
   cors: { origin: "*" }
 });
 
-// We use a Set to store multiple unique tokens per user
-let userPushTokens = {}; // { username: Set(["token1", "token2"]) }
-let activeUsers = {};    // { socketId: "username" }
+// Using Sets for multiple device support per user
+let userPushTokens = {}; 
+let activeUsers = {};    
 
 console.log("Server started on port", process.env.PORT || 3000);
 
 io.on("connection", (socket) => {
   console.log("A user connected:", socket.id);
 
-  // 1. JOIN LOGIC
   socket.on("join", (username) => {
     activeUsers[socket.id] = username;
     console.log(`${username} joined.`);
     io.emit("update-user-list", Object.values(activeUsers));
   });
 
-  // 2. TOKEN REGISTRATION (Fixed for Multiple Devices)
+  // 2. TOKEN REGISTRATION
   socket.on("register-push-token", (data) => {
     if (data.username && data.token) {
-      // If this user doesn't have a token list yet, create one
+      // Initialize a new Set for the user if it doesn't exist
       if (!userPushTokens[data.username]) {
         userPushTokens[data.username] = new Set();
       }
       
-      // Add the new token to the set (Sets automatically handle duplicates)
       userPushTokens[data.username].add(data.token);
-      
-      console.log(`Token added for ${data.username}. Total devices: ${userPushTokens[data.username].size}`);
+      console.log(`Token registered for ${data.username}. Total devices: ${userPushTokens[data.username].size}`);
     }
   });
 
-  // 3. MESSAGE LOGIC (Fixed to loop through all tokens)
+  // 3. MESSAGE LOGIC
   socket.on("send-message", async (data) => {
-    // Send to live users immediately via Socket.io
+    // Send to live users immediately
     socket.broadcast.emit("receive-message", data);
 
-    // Prepare Push Notifications
     let notifications = [];
     
+    // Loop through all users who have tokens
     for (let username in userPushTokens) {
       // Don't notify the sender
       if (username !== data.user) {
         const tokens = userPushTokens[username];
-        
-        // Loop through EVERY token this user has (Phone, Tablet, etc.)
+
+        // Ensure we are looping through the Set of tokens
         tokens.forEach(token => {
           if (Expo.isExpoPushToken(token)) {
             notifications.push({
@@ -64,16 +61,20 @@ io.on("connection", (socket) => {
       }
     }
 
-    // Chunk and send notifications
+    // Send notifications in chunks
     if (notifications.length > 0) {
+      console.log(`Sending ${notifications.length} notifications...`);
       let chunks = expo.chunkPushNotifications(notifications);
       for (let chunk of chunks) {
         try {
           await expo.sendPushNotificationsAsync(chunk);
+          console.log("Notifications sent successfully.");
         } catch (error) {
-          console.error("Notification error:", error);
+          console.error("Error sending to Expo:", error);
         }
       }
+    } else {
+      console.log("No valid push tokens found to notify.");
     }
   });
 
